@@ -1,6 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, Depends
-import whisper
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from pydantic import BaseModel
+
+try:
+    import whisper
+
+    _whisper = whisper
+except ImportError:
+    _whisper = None
 import re
 
 # 🔐 AUTH
@@ -19,7 +25,19 @@ from app.database import batch_collection
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
 
-model = whisper.load_model("base")
+_model = None
+
+
+def _get_whisper_model():
+    global _model
+    if _whisper is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Voice service unavailable: install openai-whisper (and PyTorch) on the server.",
+        )
+    if _model is None:
+        _model = _whisper.load_model("base")
+    return _model
 
 
 # 🔥 Kannada → English keyword map (common words)
@@ -103,6 +121,7 @@ async def auto_batch(
         f.write(await file.read())
 
     # 🎤 Speech → Text
+    model = _get_whisper_model()
     result = model.transcribe(file_location)
     original_text = result["text"]
 
