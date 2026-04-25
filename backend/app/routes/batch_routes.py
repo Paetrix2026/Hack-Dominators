@@ -27,6 +27,25 @@ from bson.errors import InvalidId
 
 router = APIRouter(prefix="/batch", tags=["Batch"])
 
+
+def _mongo_doc_jsonable(doc: dict) -> dict:
+    """BSON → plain dict so FastAPI returns JSON (raw Mongo docs otherwise cause 500)."""
+
+    def conv(v):
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, ObjectId):
+            return str(v)
+        if isinstance(v, datetime):
+            return v.isoformat()
+        if isinstance(v, dict):
+            return {k: conv(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [conv(x) for x in v]
+        return str(v)
+
+    return conv(doc)
+
 # 🔐 SECURITY
 security = HTTPBearer()
 
@@ -183,8 +202,7 @@ def get_all_batches(
     batches = []
 
     for batch in batch_collection.find().sort("_id", -1):
-        batch["_id"] = str(batch["_id"])
-        batches.append(batch)
+        batches.append(_mongo_doc_jsonable(batch))
 
     return {
         "count": len(batches),
@@ -202,8 +220,7 @@ def get_batch_public(batch_id: str):
     batch = batch_collection.find_one({"_id": oid})
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
-    batch["_id"] = str(batch["_id"])
-    return batch
+    return _mongo_doc_jsonable(batch)
 
 
 # 🟢 GET SINGLE (authenticated)
@@ -213,15 +230,17 @@ def get_batch(
     user=Depends(get_current_user),
     token=Depends(security)
 ):
+    try:
+        oid = ObjectId(batch_id)
+    except (InvalidId, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid batch id")
 
-    batch = batch_collection.find_one({"_id": ObjectId(batch_id)})
+    batch = batch_collection.find_one({"_id": oid})
 
     if not batch:
         return {"error": "Batch not found"}
 
-    batch["_id"] = str(batch["_id"])
-
-    return batch
+    return _mongo_doc_jsonable(batch)
 
 
 # 🟢 UPDATE STAGE (🔥 MANUFACTURER)
