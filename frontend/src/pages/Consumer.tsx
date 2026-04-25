@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { TrustGauge } from "@/components/TrustGauge";
 import { ScanLine, Sparkles, Package, Shield, ChevronLeft, ChevronRight, MapPin, Leaf, Factory, Truck, CheckCircle2, Link2 } from "lucide-react";
@@ -15,8 +15,16 @@ const nav = [
 
 type View = "scan" | "story" | "verify" | "product";
 
+const VIEW_PATH: Record<View, string> = {
+  scan: "/consumer",
+  story: "/consumer/story",
+  verify: "/consumer/verify",
+  product: "/consumer/product",
+};
+
 const Consumer = () => {
   const loc = useLocation();
+  const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -76,8 +84,10 @@ const Consumer = () => {
     try {
       const b = await getBatchById(batchId);
       setBatch(b);
-      setScanStatus("Batch loaded.");
+      setScanStatus("Batch loaded. Opening Story…");
       setView("story");
+      // Sync route so the Story tab is active, refresh works, and URL matches the view.
+      navigate("/consumer/story", { replace: true });
     } catch (e) {
       setBatch(null);
       setScanStatus(e instanceof Error ? e.message : "Failed to load batch data.");
@@ -258,7 +268,7 @@ const Consumer = () => {
         if (!videoRef.current || !scanningRef.current) return;
         const result = await decodeImage(videoRef.current);
         if (result) {
-          handleScanResult(result);
+          void handleScanResult(result);
           return;
         }
         requestAnimationFrame(scanLoop);
@@ -431,8 +441,14 @@ const Consumer = () => {
       {/* Tabs */}
       <div className="mb-6 flex flex-wrap gap-2">
         {(["scan","story","verify","product"] as const).map(k => (
-          <button key={k} onClick={() => { setView(k); setSlide(0); }}
-            className={`rounded-full px-4 py-1.5 text-sm capitalize transition-all ${view===k ? "bg-primary text-primary-foreground shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : "border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40"}`}>{k}</button>
+          <button
+            key={k}
+            type="button"
+            onClick={() => { navigate(VIEW_PATH[k]); setSlide(0); }}
+            className={`rounded-full px-4 py-1.5 text-sm capitalize transition-all ${view === k ? "bg-primary text-primary-foreground shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : "border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40"}`}
+          >
+            {k}
+          </button>
         ))}
       </div>
 
