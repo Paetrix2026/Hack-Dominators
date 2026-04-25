@@ -129,28 +129,55 @@ const Consumer = () => {
     return decodeFromCanvas(canvas);
   };
 
+  /** iOS / older Safari: createImageBitmap can fail (e.g. HEIC); use Image + canvas fallback. */
+  const imageForDecode = (file: File): Promise<CanvasImageSource> => {
+    if (typeof createImageBitmap === "function") {
+      return createImageBitmap(file).catch(() => loadFileAsImageElement(file));
+    }
+    return loadFileAsImageElement(file);
+  };
+
+  const loadFileAsImageElement = (file: File) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Image load failed"));
+      };
+      img.src = url;
+    });
+
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     setScanStatus("Reading uploaded image...");
     try {
-      const bitmap = await createImageBitmap(file);
-      const result = await decodeImage(bitmap);
-      if (result) handleScanResult(result);
-      else setScanStatus("Could not read QR code from image. Try a clearer photo.");
-    } catch {
-      setScanStatus("Upload failed. Please try another image.");
+      const source = await imageForDecode(file);
+      const result = await decodeImage(source);
+      if (result) await handleScanResult(result);
+      else setScanStatus("Could not read QR code from image. Try a clearer photo (JPG/PNG) or better lighting.");
+    } catch (err) {
+      const m = err instanceof Error ? err.message : "";
+      setScanStatus(
+        m ? `Upload failed: ${m}` : "Upload failed. On iPhone, use Photos; avoid Live Photos if the QR is small.",
+      );
     }
     if (inputRef.current) inputRef.current.value = "";
   };
 
   const startCameraScan = async () => {
-    if (!navigator?.mediaDevices?.getUserMedia) {
-      setScanStatus("Camera access is not available in this browser.");
+    const m = (navigator as Navigator & { webkitGetUserMedia?: unknown }).mediaDevices;
+    if (!m?.getUserMedia) {
+      setScanStatus("Camera is not available (try Safari/Chrome, or a normal browser — not in-app).");
       return;
     }
 
-    setScanStatus("Requesting camera permission...");
+    setScanStatus("Requesting camera permission…");
     try {
       setVerified(false);
       setBatch(null);
@@ -165,34 +192,64 @@ const Consumer = () => {
       // Ensure the <video> element is mounted before attaching stream.
       scanningRef.current = true;
       setScanning(true);
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      // Double rAF helps iOS mount the video before attach
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      const ask = (constraints: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(constraints);
+
+      let stream: MediaStream;
+      try {
+        stream = await ask({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (first) {
+        try {
+          stream = await ask({ video: { facingMode: { ideal: "environment" } }, audio: false });
+        } catch {
+          // Many phones: avoid OverconstrainedError
+          stream = await ask({ video: true, audio: false });
+        }
+      }
       streamRef.current = stream;
       if (!videoRef.current) throw new Error("Video element not ready");
 
-      videoRef.current.srcObject = stream;
-      videoRef.current.muted = true;
-      videoRef.current.playsInline = true;
+      const v = videoRef.current;
+      v.setAttribute("playsinline", "");
+      v.setAttribute("webkit-playsinline", "true");
+      v.muted = true;
+      v.playsInline = true;
+      v.srcObject = stream;
 
       // Wait for metadata so videoWidth/videoHeight are non-zero
-      await new Promise<void>((resolve) => {
-        const v = videoRef.current!;
+      await new Promise<void>(resolve => {
+        let finished = false;
         const done = () => {
+          if (finished) return;
+          finished = true;
           v.removeEventListener("loadedmetadata", done);
+          v.removeEventListener("canplay", done);
           resolve();
         };
         v.addEventListener("loadedmetadata", done);
+        v.addEventListener("canplay", done);
+        if (v.readyState >= 1) done();
       });
 
-      await videoRef.current.play();
+      try {
+        await v.play();
+      } catch {
+        setScanStatus("Tap the preview once if the camera stays black, then point at the QR code.");
+        try {
+          await v.play();
+        } catch {
+          /* user may need to interact; stream is still attached */
+        }
+      }
       setScanStatus("Point the camera at a QR code.");
 
       const scanLoop = async () => {
@@ -207,13 +264,15 @@ const Consumer = () => {
 
       scanLoop();
     } catch (e) {
-      const msg =
-        e && typeof e === "object" && "name" in e
-          ? String((e as any).name)
-          : e instanceof Error
-            ? e.message
-            : "unknown error";
-      setScanStatus(`Camera error: ${msg}`);
+      const name = e && typeof e === "object" && "name" in e ? String((e as { name: string }).name) : "";
+      const hint =
+        name === "NotAllowedError" || name === "PermissionDeniedError"
+          ? "Enable Camera in browser/site settings."
+          : name === "OverconstrainedError"
+            ? "Tried a simpler camera mode; see previous message."
+            : "Use HTTPS, open the site in Safari/Chrome (not Instagram/WhatsApp in-app).";
+      const msg = e instanceof Error ? e.message : "unknown";
+      setScanStatus(`Camera error: ${name || msg}. ${hint}`);
       stopCameraScan();
     }
   };
@@ -406,15 +465,22 @@ const Consumer = () => {
           </div>
 
           <div className="mt-6 grid gap-3">
-            <button onClick={() => (scanning ? stopCameraScan() : startCameraScan())}
+            <button type="button" onClick={() => (scanning ? stopCameraScan() : startCameraScan())}
               className="w-full rounded-xl bg-gradient-primary px-6 py-4 text-sm font-semibold text-primary-foreground shadow-[0_0_40px_hsl(var(--primary)/0.5)] hover:scale-[1.01] transition-transform">
               {scanning ? "Stop camera" : "Open camera"}
             </button>
-            <button onClick={() => inputRef.current?.click()}
+            <button type="button" onClick={() => inputRef.current?.click()}
               className="w-full rounded-xl border border-border/60 bg-card/80 px-6 py-4 text-sm font-semibold text-foreground hover:border-primary/40 transition-colors">
               Upload QR image
             </button>
-            <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleUpload} />
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*,.heic,.heif"
+              onChange={handleUpload}
+              className="sr-only"
+              tabIndex={-1}
+            />
             <div className="rounded-2xl border border-border/50 bg-card/50 p-3 text-xs text-muted-foreground">
               <div>{scanStatus}</div>
               <div className="mt-2">Location: {locationLabel}</div>
