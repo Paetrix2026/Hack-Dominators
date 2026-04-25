@@ -70,11 +70,32 @@ const authedFetch = async (path: string, init: RequestInit = {}) => {
   return data;
 };
 
+const readErrorMessage = (data: Record<string, unknown>, status: number): string => {
+  const d = data?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d) && d[0] && typeof d[0] === "object" && d[0] !== null && "msg" in d[0]) {
+    return String((d[0] as { msg: string }).msg);
+  }
+  if (typeof data?.message === "string") return data.message;
+  return `Request failed (${status})`;
+};
+
 /** Batch lookup for QR / consumer path — no Firebase sign-in. */
 const publicFetch = async (path: string) => {
   const res = await doFetch(`${API_BASE}${path}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || data?.message || "Request failed");
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    if (!res.ok) {
+      throw new Error(
+        text ? `Server returned non-JSON (${res.status}): ${text.slice(0, 160)}` : `Empty response (${res.status})`,
+      );
+    }
+    data = {};
+  }
+  if (!res.ok) throw new Error(readErrorMessage(data, res.status));
   if (data && typeof data === "object" && "error" in data) {
     throw new Error(String((data as { error: string }).error));
   }

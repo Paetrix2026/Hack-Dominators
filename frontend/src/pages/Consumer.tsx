@@ -6,12 +6,14 @@ import { ScanLine, Sparkles, Package, Shield, ChevronLeft, ChevronRight, MapPin,
 import jsQR from "jsqr";
 import { ApiBatch, getBatchById } from "@/lib/api";
 
-const nav = [
+const navFull = [
   { label: "Scan", to: "/consumer", icon: ScanLine },
   { label: "Story", to: "/consumer/story", icon: Sparkles },
   { label: "Verify", to: "/consumer/verify", icon: Shield },
   { label: "Product", to: "/consumer/product", icon: Package },
 ];
+
+const navScanOnly = [{ label: "Scan", to: "/consumer", icon: ScanLine }];
 
 type View = "scan" | "story" | "verify" | "product";
 
@@ -34,7 +36,6 @@ const Consumer = () => {
   const [scanning, setScanning] = useState(false);
   const [verified, setVerified] = useState(false);
   const [scanStatus, setScanStatus] = useState("Ready to scan.");
-  const [scanResult, setScanResult] = useState<string | null>(null);
   const [batch, setBatch] = useState<ApiBatch | null>(null);
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -56,12 +57,12 @@ const Consumer = () => {
     return "Local farmer";
   };
 
+  /** MongoDB ObjectId is exactly 24 hex characters — looser patterns mis-decode QR noise. */
   const parseBatchId = (value: string) => {
-    // QR encodes batch view URL, e.g. https://ayurtrust-1.onrender.com/batch/view/<id>
-    const m = value.match(/\/batch\/view\/([a-f0-9]{10,})/i);
-    if (m?.[1]) return m[1];
-    // also support raw id
-    if (/^[a-f0-9]{10,}$/i.test(value.trim())) return value.trim();
+    const m = value.match(/\/batch\/view\/([a-f0-9]{24})\b/i);
+    if (m?.[1]) return m[1].toLowerCase();
+    const t = value.trim();
+    if (/^[a-f0-9]{24}$/i.test(t)) return t.toLowerCase();
     return null;
   };
 
@@ -74,23 +75,21 @@ const Consumer = () => {
     }
     const batchId = parseBatchId(value);
     if (!batchId) {
-      setScanResult(value);
-      setScanStatus("QR read, but batch id not recognized.");
+      setScanStatus(
+        "Could not read a valid batch id from this QR (expected 24-character id). Try a clearer image or rescan.",
+      );
       return;
     }
-
-    setScanResult(`Batch: ${batchId}`);
 
     try {
       const b = await getBatchById(batchId);
       setBatch(b);
-      setScanStatus("Batch loaded. Opening Story…");
+      setScanStatus("Batch loaded.");
       setView("story");
-      // Sync route so the Story tab is active, refresh works, and URL matches the view.
       navigate("/consumer/story", { replace: true });
     } catch (e) {
       setBatch(null);
-      setScanStatus(e instanceof Error ? e.message : "Failed to load batch data.");
+      setScanStatus(e instanceof Error ? e.message : "Could not load this batch.");
     }
   };
 
@@ -193,7 +192,6 @@ const Consumer = () => {
     try {
       setVerified(false);
       setBatch(null);
-      setScanResult(null);
 
       // stop any previous stream first
       if (streamRef.current) {
@@ -300,13 +298,27 @@ const Consumer = () => {
   };
 
   useEffect(() => {
-    const path = loc.pathname.replace("/consumer", "");
-    if (path.startsWith("/story")) setView("story");
-    else if (path.startsWith("/verify")) setView("verify");
-    else if (path.startsWith("/product")) setView("product");
-    else setView("scan");
+    const rest = (loc.pathname.replace(/^\/consumer/, "") || "/") as string;
+    if (!batch) {
+      if (rest !== "/" && rest !== "") {
+        navigate("/consumer", { replace: true });
+      }
+      setView("scan");
+      setSlide(0);
+      return;
+    }
+    if (rest === "/" || rest === "") {
+      navigate("/consumer/story", { replace: true });
+      setView("story");
+      setSlide(0);
+      return;
+    }
+    if (rest.startsWith("/story")) setView("story");
+    else if (rest.startsWith("/verify")) setView("verify");
+    else if (rest.startsWith("/product")) setView("product");
+    else setView("story");
     setSlide(0);
-  }, [loc.pathname]);
+  }, [loc.pathname, batch, navigate]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -436,23 +448,37 @@ const Consumer = () => {
 
   // Note: we do NOT auto-advance. We only move to Story after a real QR decode.
 
-  return (
-    <AppShell role="Consumer" nav={nav}>
-      {/* Tabs */}
-      <div className="mb-6 flex flex-wrap gap-2">
-        {(["scan","story","verify","product"] as const).map(k => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => { navigate(VIEW_PATH[k]); setSlide(0); }}
-            className={`rounded-full px-4 py-1.5 text-sm capitalize transition-all ${view === k ? "bg-primary text-primary-foreground shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : "border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40"}`}
-          >
-            {k}
-          </button>
-        ))}
-      </div>
+  const goScanTab = () => {
+    setBatch(null);
+    setVerified(false);
+    setScanStatus("Ready to scan.");
+    navigate("/consumer", { replace: true });
+  };
 
-      {view === "scan" && (
+  return (
+    <AppShell role="Consumer" nav={batch ? navFull : navScanOnly}>
+      {batch && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {(["scan", "story", "verify", "product"] as const).map(k => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => {
+                if (k === "scan") goScanTab();
+                else {
+                  navigate(VIEW_PATH[k]);
+                  setSlide(0);
+                }
+              }}
+              className={`rounded-full px-4 py-1.5 text-sm capitalize transition-all ${view === k ? "bg-primary text-primary-foreground shadow-[0_0_24px_hsl(var(--primary)/0.5)]" : "border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40"}`}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {(!batch || view === "scan") && (
         <div className="mx-auto max-w-md">
           <div className="text-center mb-4">
             <h1 className="text-2xl font-bold">Scan QR on pack</h1>
@@ -501,15 +527,18 @@ const Consumer = () => {
             />
             <div className="rounded-2xl border border-border/50 bg-card/50 p-3 text-xs text-muted-foreground">
               <div>{scanStatus}</div>
-              <div className="mt-2">Location: {locationLabel}</div>
-              <div>Detected farmer: {nearbyFarmer}</div>
-              {scanResult && <div className="mt-2 font-semibold text-foreground">QR result: {scanResult}</div>}
+              {batch && (
+                <>
+                  <div className="mt-2">Location: {locationLabel}</div>
+                  <div>Detected farmer: {nearbyFarmer}</div>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {view === "story" && (
+      {batch && view === "story" && (
         <div className="mx-auto max-w-md">
           {/* progress bars */}
           <div className="mb-4 grid grid-cols-4 gap-1.5">
@@ -534,7 +563,7 @@ const Consumer = () => {
         </div>
       )}
 
-      {view === "verify" && (
+      {batch && view === "verify" && (
         <div className="mx-auto max-w-md text-center">
           <h1 className="text-2xl font-bold">Blockchain verification</h1>
           <p className="mt-1 text-sm text-muted-foreground">Cryptographic proof of authenticity</p>
@@ -558,7 +587,7 @@ const Consumer = () => {
         </div>
       )}
 
-      {view === "product" && (
+      {batch && view === "product" && (
         <div className="mx-auto max-w-2xl">
           <div className="glass rounded-3xl p-6 border border-border/60">
             <div className="flex items-start justify-between gap-4">
