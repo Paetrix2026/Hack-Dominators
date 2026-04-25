@@ -26,6 +26,7 @@ from app.database import batch_collection, herb_request_collection
 
 from bson import ObjectId
 from bson.errors import InvalidId
+from pymongo.errors import PyMongoError
 
 router = APIRouter(prefix="/batch", tags=["Batch"])
 
@@ -234,6 +235,16 @@ def get_batch_public(batch_id: str):
         return _mongo_doc_jsonable(batch)
     except HTTPException:
         raise
+    except PyMongoError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Cannot reach MongoDB. On Render open your Web Service → Environment → add "
+                "MONGODB_URI with your MongoDB Atlas connection string (mongodb+srv://user:pass@cluster...). "
+                "Redeploy after saving. "
+                f"({e!s})"
+            ),
+        ) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {e!s}") from e
 

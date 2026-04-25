@@ -1,3 +1,6 @@
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -38,6 +41,18 @@ app.add_middleware(
 # 🔗 REGISTER ROUTES
 app.include_router(batch_routes.router)
 app.include_router(voice_routes.router)   # ✅ ADD THIS
+
+
+@app.on_event("startup")
+def _warn_mongo_on_render():
+    if not os.environ.get("RENDER"):
+        return
+    uri = (os.environ.get("MONGODB_URI") or os.environ.get("DATABASE_URL") or "").strip()
+    if not uri or "localhost" in uri or "127.0.0.1" in uri:
+        logging.warning(
+            "MONGODB_URI is missing or still points to localhost. "
+            "Set MONGODB_URI in Render → Environment to your MongoDB Atlas URI, then redeploy."
+        )
 
 
 # 🟢 HOME ROUTE
