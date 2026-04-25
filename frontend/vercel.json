@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://ayurtrust-1.onrender.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
