@@ -1,8 +1,11 @@
 import { getFirebaseAuth } from "@/lib/firebase";
 
-const DEFAULT_PROD_API = "https://ayurtrust-1.onrender.com";
-
-/** Never use a localhost / 127.0.0.1 base on the public site — it causes “Failed to fetch” on every device. */
+/**
+ * Production: default `/api` on the same origin (e.g. ayur-trust.vercel.app) so Vercel can
+ * reverse-proxy to Render (see `vercel.json`). That avoids CORS, ad blockers, and some
+ * “Failed to fetch” issues from calling onrender.com directly in the browser.
+ * Dev: Vite proxies `/api` to your local backend.
+ */
 const resolveApiBase = (): string => {
   const raw = import.meta.env.VITE_API_BASE_URL?.trim();
   const isDev = import.meta.env.DEV;
@@ -16,20 +19,23 @@ const resolveApiBase = (): string => {
     try {
       const { hostname } = new URL(u);
       if (hostname === "localhost" || hostname === "127.0.0.1") {
-        return DEFAULT_PROD_API;
+        return "/api";
+      }
+      if (hostname.endsWith("onrender.com")) {
+        return "/api";
       }
     } catch {
-      /* ignore; return u below */
+      /* ignore */
     }
     return u.replace(/\/+$/, "");
   }
-  return DEFAULT_PROD_API;
+  return "/api";
 };
 
 const API_BASE = resolveApiBase();
 
 const networkErrorMessage = () =>
-  `Cannot reach the server (${API_BASE}). In Vercel, set VITE_API_BASE_URL to https://ayurtrust-1.onrender.com (or your API URL), redeploy, and open the Render service so it is not stopped.`;
+  `Cannot reach the API. Check your network, redeploy Vercel with frontend/vercel.json, and wait for Render to wake if the service was sleeping. (Base: ${API_BASE})`;
 
 const doFetch = async (url: string, init: RequestInit = {}): Promise<Response> => {
   const merged: RequestInit = { mode: "cors", credentials: "omit", cache: "no-store", ...init };
