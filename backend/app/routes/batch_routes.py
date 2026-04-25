@@ -1,6 +1,8 @@
+import json
 from datetime import datetime
 from uuid import uuid4
 
+from bson import json_util
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer
@@ -28,23 +30,31 @@ from bson.errors import InvalidId
 router = APIRouter(prefix="/batch", tags=["Batch"])
 
 
+def _flatten_extended_json(obj):
+    """Turn Mongo extended JSON ($oid, $date, …) into plain JSON-safe values."""
+    if isinstance(obj, dict):
+        keys = set(obj.keys())
+        if keys == {"$oid"}:
+            return obj["$oid"]
+        if keys == {"$date"}:
+            d = obj["$date"]
+            return d if isinstance(d, str) else str(d)
+        if keys == {"$numberDecimal"}:
+            return obj["$numberDecimal"]
+        if keys == {"$numberLong"}:
+            return int(obj["$numberLong"])
+        if keys == {"$numberDouble"}:
+            return float(obj["$numberDouble"])
+        return {k: _flatten_extended_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_flatten_extended_json(x) for x in obj]
+    return obj
+
+
 def _mongo_doc_jsonable(doc: dict) -> dict:
-    """BSON → plain dict so FastAPI returns JSON (raw Mongo docs otherwise cause 500)."""
-
-    def conv(v):
-        if v is None or isinstance(v, (str, int, float, bool)):
-            return v
-        if isinstance(v, ObjectId):
-            return str(v)
-        if isinstance(v, datetime):
-            return v.isoformat()
-        if isinstance(v, dict):
-            return {k: conv(x) for k, x in v.items()}
-        if isinstance(v, list):
-            return [conv(x) for x in v]
-        return str(v)
-
-    return conv(doc)
+    """BSON document → dict FastAPI can serialize (avoids 500 on nested ObjectId/datetime)."""
+    raw = json.loads(json_util.dumps(doc))
+    return _flatten_extended_json(raw)
 
 # 🔐 SECURITY
 security = HTTPBearer()
@@ -214,13 +224,18 @@ def get_all_batches(
 @router.get("/public/{batch_id}")
 def get_batch_public(batch_id: str):
     try:
-        oid = ObjectId(batch_id)
-    except (InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid batch id")
-    batch = batch_collection.find_one({"_id": oid})
-    if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    return _mongo_doc_jsonable(batch)
+        try:
+            oid = ObjectId(batch_id)
+        except (InvalidId, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid batch id")
+        batch = batch_collection.find_one({"_id": oid})
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        return _mongo_doc_jsonable(batch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {e!s}") from e
 
 
 # 🟢 GET SINGLE (authenticated)
