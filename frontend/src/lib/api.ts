@@ -1,8 +1,47 @@
 import { getFirebaseAuth } from "@/lib/firebase";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL?.trim() ||
-  (import.meta.env.DEV ? "/api" : "https://ayurtrust-1.onrender.com");
+const DEFAULT_PROD_API = "https://ayurtrust-1.onrender.com";
+
+/** Never use a localhost / 127.0.0.1 base on the public site — it causes “Failed to fetch” on every device. */
+const resolveApiBase = (): string => {
+  const raw = import.meta.env.VITE_API_BASE_URL?.trim();
+  const isDev = import.meta.env.DEV;
+  if (isDev) {
+    if (raw) return raw.replace(/\/+$/, "");
+    return "/api";
+  }
+  if (raw) {
+    let u = raw.replace(/\/+$/, "");
+    if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+    try {
+      const { hostname } = new URL(u);
+      if (hostname === "localhost" || hostname === "127.0.0.1") {
+        return DEFAULT_PROD_API;
+      }
+    } catch {
+      /* ignore; return u below */
+    }
+    return u.replace(/\/+$/, "");
+  }
+  return DEFAULT_PROD_API;
+};
+
+const API_BASE = resolveApiBase();
+
+const networkErrorMessage = () =>
+  `Cannot reach the server (${API_BASE}). In Vercel, set VITE_API_BASE_URL to https://ayurtrust-1.onrender.com (or your API URL), redeploy, and open the Render service so it is not stopped.`;
+
+const doFetch = async (url: string, init: RequestInit = {}): Promise<Response> => {
+  const merged: RequestInit = { mode: "cors", credentials: "omit", cache: "no-store", ...init };
+  try {
+    return await fetch(url, merged);
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error(networkErrorMessage());
+    }
+    throw e;
+  }
+};
 
 const getToken = async () => {
   const user = getFirebaseAuth().currentUser;
@@ -12,10 +51,10 @@ const getToken = async () => {
 
 const authedFetch = async (path: string, init: RequestInit = {}) => {
   const token = await getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await doFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
-      ...(init.headers || {}),
+      ...(init.headers as Record<string, string> | undefined),
       Authorization: `Bearer ${token}`,
     },
   });
@@ -27,7 +66,7 @@ const authedFetch = async (path: string, init: RequestInit = {}) => {
 
 /** Batch lookup for QR / consumer path — no Firebase sign-in. */
 const publicFetch = async (path: string) => {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await doFetch(`${API_BASE}${path}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.detail || data?.message || "Request failed");
   if (data && typeof data === "object" && "error" in data) {
