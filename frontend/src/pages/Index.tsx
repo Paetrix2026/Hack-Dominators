@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Sprout, Factory, ScanLine, ShieldCheck, Cpu, Link2, LogIn, LogOut } from "lucide-react";
+import { Sprout, Factory, ScanLine, ShieldCheck, Cpu, Link2, LogIn, LogOut, AlertTriangle } from "lucide-react";
 import { Particles } from "@/components/Particles";
 import { LoginModal } from "@/components/LoginModal";
 import { Role, useAuth } from "@/lib/auth";
+import { isFirebaseConfigured } from "@/lib/firebase";
 
 const roles: { role: Role; icon: React.ComponentType<{ className?: string }>; title: string; desc: string; accent: string; glow: string; border: string }[] = [
   {
@@ -144,6 +145,14 @@ const Index = () => {
       </main>
 
       <LoginModal open={openLogin} onClose={() => setOpenLogin(false)} defaultRole={defaultRole} />
+
+      {!isFirebaseConfigured() && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-destructive/40 bg-destructive/10 px-4 py-3 text-center text-sm text-foreground backdrop-blur-md">
+          <AlertTriangle className="inline-block h-4 w-4 align-text-bottom text-destructive" />{" "}
+          <strong className="text-destructive">Sign-in disabled on this deploy:</strong> add all{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">VITE_FIREBASE_*</code> variables in Vercel → Settings → Environment Variables, then redeploy.
+        </div>
+      )}
     </div>
   );
 };

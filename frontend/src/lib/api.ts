@@ -1,11 +1,11 @@
-import { firebaseAuth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL?.trim() ||
   (import.meta.env.DEV ? "/api" : "https://ayurtrust-1.onrender.com");
 
 const getToken = async () => {
-  const user = firebaseAuth.currentUser;
+  const user = getFirebaseAuth().currentUser;
   if (!user) throw new Error("Please sign in first.");
   return user.getIdToken();
 };

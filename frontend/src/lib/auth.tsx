@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { firebaseAuth } from "@/lib/firebase";
+import { getFirebaseAuth } from "@/lib/firebase";
 
 export type Role = "Farmer" | "Manufacturer" | "Consumer";
 export type User = { name: string; role: Role; email: string };
@@ -65,7 +65,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser({ role, name: resolvedName, email: resolvedEmail });
   };
   const logout = async () => {
-    await signOut(firebaseAuth);
+    await signOut(getFirebaseAuth());
     setUser(null);
   };
 
