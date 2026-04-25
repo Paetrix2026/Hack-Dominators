@@ -25,6 +25,17 @@ const authedFetch = async (path: string, init: RequestInit = {}) => {
   return data;
 };
 
+/** Batch lookup for QR / consumer path — no Firebase sign-in. */
+const publicFetch = async (path: string) => {
+  const res = await fetch(`${API_BASE}${path}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.detail || data?.message || "Request failed");
+  if (data && typeof data === "object" && "error" in data) {
+    throw new Error(String((data as { error: string }).error));
+  }
+  return data;
+};
+
 export type ApiBatch = {
   _id: string;
   herb_name: string;
@@ -61,7 +72,7 @@ export const getBatches = async (): Promise<ApiBatch[]> => {
 };
 
 export const getBatchById = async (batchId: string): Promise<ApiBatch> => {
-  const data = await authedFetch(`/batch/${batchId}`);
+  const data = await publicFetch(`/batch/public/${batchId}`);
   return data as ApiBatch;
 };
 

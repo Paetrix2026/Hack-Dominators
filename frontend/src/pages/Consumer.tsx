@@ -58,7 +58,6 @@ const Consumer = () => {
   };
 
   const handleScanResult = async (value: string) => {
-    setScanResult(value);
     setScanStatus("QR code detected. Fetching batch…");
     setScanning(false);
     if (streamRef.current) {
@@ -67,9 +66,12 @@ const Consumer = () => {
     }
     const batchId = parseBatchId(value);
     if (!batchId) {
+      setScanResult(value);
       setScanStatus("QR read, but batch id not recognized.");
       return;
     }
+
+    setScanResult(`Batch: ${batchId}`);
 
     try {
       const b = await getBatchById(batchId);

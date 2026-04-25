@@ -23,6 +23,7 @@ from app.services.fraud_service import detect_fraud
 from app.database import batch_collection, herb_request_collection
 
 from bson import ObjectId
+from bson.errors import InvalidId
 
 router = APIRouter(prefix="/batch", tags=["Batch"])
 
@@ -191,7 +192,21 @@ def get_all_batches(
     }
 
 
-# 🟢 GET SINGLE
+# 🟢 GET SINGLE (public — consumer QR scan; no sign-in)
+@router.get("/public/{batch_id}")
+def get_batch_public(batch_id: str):
+    try:
+        oid = ObjectId(batch_id)
+    except (InvalidId, TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid batch id")
+    batch = batch_collection.find_one({"_id": oid})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    batch["_id"] = str(batch["_id"])
+    return batch
+
+
+# 🟢 GET SINGLE (authenticated)
 @router.get("/{batch_id}")
 def get_batch(
     batch_id: str,
