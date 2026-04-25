@@ -49,7 +49,7 @@ const Consumer = () => {
   };
 
   const parseBatchId = (value: string) => {
-    // QR currently encodes: http://127.0.0.1:8000/batch/view/<id>
+    // QR encodes batch view URL, e.g. https://ayurtrust-1.onrender.com/batch/view/<id>
     const m = value.match(/\/batch\/view\/([a-f0-9]{10,})/i);
     if (m?.[1]) return m[1];
     // also support raw id

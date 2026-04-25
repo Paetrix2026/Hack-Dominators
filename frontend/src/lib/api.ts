@@ -1,6 +1,8 @@
 import { firebaseAuth } from "@/lib/firebase";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL?.trim() ||
+  (import.meta.env.DEV ? "/api" : "https://ayurtrust-1.onrender.com");
 
 const getToken = async () => {
   const user = firebaseAuth.currentUser;
