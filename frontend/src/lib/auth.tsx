@@ -57,7 +57,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Password is required.");
     }
 
-    await signInWithEmailAndPassword(firebaseAuth, resolvedEmail, resolvedPassword);
+    await signInWithEmailAndPassword(getFirebaseAuth(), resolvedEmail, resolvedPassword);
 
     const resolvedName = name?.trim()
       ? name.trim()
