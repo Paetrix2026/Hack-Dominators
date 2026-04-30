@@ -55,18 +55,70 @@ const getToken = async () => {
   return user.getIdToken();
 };
 
+const getClientRole = (): string | null => {
+  try {
+    const raw = localStorage.getItem("ayurtrust.user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { role?: string };
+    return typeof parsed?.role === "string" ? parsed.role : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Turn FastAPI `detail` (string | object | array) into one user-readable message. */
+const formatDetailMessage = (detail: unknown): string | null => {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail[0] && typeof detail[0] === "object" && detail[0] !== null && "msg" in detail[0]) {
+    return String((detail[0] as { msg: string }).msg);
+  }
+  if (detail && typeof detail === "object") {
+    const o = detail as Record<string, unknown>;
+    const base = typeof o.message === "string" ? o.message : null;
+    const inv = o.invalid_photos;
+    if (Array.isArray(inv) && inv.length > 0) {
+      const parts = inv
+        .map((row: unknown) => {
+          if (!row || typeof row !== "object") return "";
+          const r = row as Record<string, unknown>;
+          const reason = typeof r.reason === "string" ? r.reason : "";
+          const fn = typeof r.filename === "string" ? r.filename : `photo ${r.index ?? ""}`;
+          return reason ? `${fn}: ${reason}` : "";
+        })
+        .filter(Boolean);
+      if (parts.length) return [base, parts.join(" ")].filter(Boolean).join(" — ");
+    }
+    if (base) return base;
+  }
+  return null;
+};
+
 const authedFetch = async (path: string, init: RequestInit = {}) => {
   const token = await getToken();
+  const role = getClientRole();
   const res = await doFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       ...(init.headers as Record<string, string> | undefined),
       Authorization: `Bearer ${token}`,
+      ...(role ? { "X-User-Role": role } : {}),
     },
   });
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.detail || data?.message || "Request failed");
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    if (!res.ok) {
+      throw new Error(`Server error (${res.status}): ${text.slice(0, 100) || "Empty response"}`);
+    }
+  }
+
+  if (!res.ok) {
+    const fromDetail = formatDetailMessage(data?.detail);
+    throw new Error(fromDetail || data?.message || `Request failed (${res.status})`);
+  }
   return data;
 };
 
@@ -104,6 +156,14 @@ const publicFetch = async (path: string) => {
 
 export type ApiBatch = {
   _id: string;
+  type?: "herb" | "medicine";
+  product_name?: string;
+  composition?: Array<{
+    herb: string;
+    quantity: string;
+    farmer: string;
+    location: string;
+  }>;
   herb_name: string;
   farmer_name: string;
   user_email?: string;
@@ -113,13 +173,40 @@ export type ApiBatch = {
   trust_score: number;
   trust_grade?: string;
   quality_score: number;
+  geo_valid?: boolean;
+  fraud_flag?: boolean;
+  compliance_status?: "PASS" | "FAIL";
   fraud_risk?: string;
   blockchain_hash: string;
   tx_hash: string;
+  qr_code?: string;
+  dosage?: string;
+  warnings?: string[];
+  side_effects?: Array<{
+    symptoms: string;
+    severity: string;
+    timestamp: string;
+  }>;
   photo_count?: number;
   trust_certificate?: { certificate_id: string; grade: string };
   created_at?: string;
+  verification_match?: boolean | null;
+  photo_urls?: string[];
+  herb_items?: Array<{
+    index: number;
+    claimed_herb: string;
+    resolved_herb: string;
+    quantity: number;
+    notes?: string;
+    photo_index: number;
+    photo_url?: string;
+    photo_name?: string;
+    quality_score?: number;
+    verification_match?: boolean | null;
+    verified?: boolean;
+  }>;
 };
+
 
 export type ApiHerbRequest = {
   _id: string;
@@ -148,13 +235,34 @@ export const uploadBatch = async (input: {
   quantity: number;
   location: string;
   photos: File[];
+  items?: Array<{
+    herb_name: string;
+    quantity: number;
+    notes?: string;
+    photo_index: number;
+  }>;
 }) => {
+  const safeName = (value: string) =>
+    (value || "herb")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+
   const form = new FormData();
   form.append("farmer_name", input.farmer_name);
   form.append("herb_name", input.herb_name);
   form.append("quantity", String(input.quantity));
   form.append("location", input.location);
-  input.photos.forEach((p) => form.append("photos", p));
+  if (input.items?.length) {
+    form.append("items", JSON.stringify(input.items));
+  }
+  input.photos.forEach((p, idx) => {
+    const ext = p.name.includes(".") ? p.name.slice(p.name.lastIndexOf(".")) : ".jpg";
+    // IMPORTANT: Do not encode claimed herb into the filename.
+    // The backend uses visual ML/validation; filenames should not bias classification.
+    const renamed = `capture-${idx + 1}${ext}`;
+    form.append("photos", p, renamed);
+  });
   return authedFetch("/batch/upload", { method: "POST", body: form });
 };
 
@@ -163,6 +271,45 @@ export const translateKannada = async (text: string) => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
+  });
+};
+
+export const submitVoiceInput = async (payload: {
+  speech_text: string;
+  language?: string;
+  location?: string;
+}) => {
+  return authedFetch("/voice/voice-input", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const updateBatchStage = async (
+  batchId: string,
+  payload: { new_stage: "Collected" | "Processed" | "Manufactured" | "Packaged" | "Ready"; compliance_status: "PASS" | "FAIL" },
+) => {
+  return authedFetch(`/update-stage/${batchId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const reportSideEffect = async (batchId: string, payload: { symptoms: string; severity: string }) => {
+  return authedFetch(`/report-side-effect/${batchId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const createMedicine = async (payload: { product_name: string; batch_ids: string[] }) => {
+  return authedFetch("/create-medicine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 };
 

@@ -7,9 +7,9 @@ def _public_base() -> str:
     return (os.environ.get("PUBLIC_BASE_URL") or "https://ayurtrust-1.onrender.com").rstrip("/")
 
 
-def generate_qr(batch_id, filename=None):
+def generate_qr(batch_id, filename=None, url: str = None):
 
-    url = f"{_public_base()}/batch/view/{batch_id}"
+    final_url = url or f"{_public_base()}/batch/view/{batch_id}"
 
     if not filename:
         filename = f"{batch_id}.png"
@@ -19,7 +19,7 @@ def generate_qr(batch_id, filename=None):
 
     file_path = os.path.join(folder, filename)
 
-    qr = qrcode.make(url)
+    qr = qrcode.make(final_url)
     qr.save(file_path)
 
-    return file_path
+    return f"/api/qr_codes/{filename}"

@@ -17,7 +17,13 @@ export const AppShell = ({ role, nav, children }: Props) => {
   const nav2 = useNavigate();
   const { user, logout } = useAuth();
 
-  const handleLogout = () => { logout(); nav2("/"); };
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      nav2("/", { replace: true });
+    }
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden">

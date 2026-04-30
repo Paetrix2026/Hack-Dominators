@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index.tsx";
+import Intro from "./pages/Intro.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Farmer from "./pages/Farmer.tsx";
 import Manufacturer from "./pages/Manufacturer.tsx";
@@ -14,7 +15,7 @@ const queryClient = new QueryClient();
 
 const Protected = ({ role, children }: { role: Role; children: JSX.Element }) => {
   const { user } = useAuth();
-  if (!user) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/home" replace />;
   if (user.role !== role) return <Navigate to={`/${user.role.toLowerCase()}`} replace />;
   return children;
 };
@@ -27,7 +28,8 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<Index />} />
+            <Route path="/" element={<Intro />} />
+            <Route path="/home" element={<Index />} />
             <Route path="/farmer/*"       element={<Protected role="Farmer"><Farmer /></Protected>} />
             <Route path="/manufacturer/*" element={<Protected role="Manufacturer"><Manufacturer /></Protected>} />
             <Route path="/consumer/*"     element={<Protected role="Consumer"><Consumer /></Protected>} />

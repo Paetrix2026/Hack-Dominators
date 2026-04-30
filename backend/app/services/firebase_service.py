@@ -39,7 +39,11 @@ def _ensure_firebase() -> bool:
         )
         return False
 
-    firebase_admin.initialize_app(cred)
+    try:
+        firebase_admin.initialize_app(cred)
+    except ValueError:
+        # Already initialized in this process
+        pass
     _initialized = True
     return True
 

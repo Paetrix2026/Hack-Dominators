@@ -65,8 +65,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser({ role, name: resolvedName, email: resolvedEmail });
   };
   const logout = async () => {
-    await signOut(getFirebaseAuth());
-    setUser(null);
+    try {
+      await signOut(getFirebaseAuth());
+    } finally {
+      // Always clear local auth state even if Firebase signOut fails.
+      setUser(null);
+    }
   };
 
   return <Ctx.Provider value={{ user, login, logout }}>{children}</Ctx.Provider>;

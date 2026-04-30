@@ -5,11 +5,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RPC_URL = os.getenv("RPC_URL")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
+RPC_URL = (os.getenv("RPC_URL") or "").strip()
+PRIVATE_KEY = (os.getenv("PRIVATE_KEY") or "").strip()
+WALLET_ADDRESS = (os.getenv("WALLET_ADDRESS") or "").strip()
 
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+w3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 10})) if RPC_URL else Web3()
 
 # 🔐 Generate hash
 def generate_hash(data):
@@ -19,6 +19,9 @@ def generate_hash(data):
 # 🚀 Store hash on blockchain (Polygon Amoy)
 def store_on_blockchain(data_hash):
     try:
+        if not RPC_URL or not PRIVATE_KEY or not WALLET_ADDRESS:
+            print("❌ Blockchain Error: missing RPC_URL/PRIVATE_KEY/WALLET_ADDRESS")
+            return "failed"
         if not w3.is_connected():
             raise Exception("❌ Blockchain not connected")
 

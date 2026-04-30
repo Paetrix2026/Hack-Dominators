@@ -48,6 +48,14 @@ const Index = () => {
     setOpenLogin(true);
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      nav("/home", { replace: true });
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden">
       <div className="pointer-events-none absolute inset-0 grid-bg opacity-30" />
@@ -72,7 +80,7 @@ const Index = () => {
                 <span className="grid h-5 w-5 place-items-center rounded-full bg-gradient-primary text-[10px] font-bold text-primary-foreground">{user.name[0]}</span>
                 {user.name}
               </button>
-              <button onClick={logout}
+              <button onClick={handleLogout}
                 className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1.5 text-xs hover:border-destructive/50 hover:text-destructive transition-colors">
                 <LogOut className="h-3.5 w-3.5" /> Sign out
               </button>

@@ -4,7 +4,7 @@ import { AppShell } from "@/components/AppShell";
 import { TrustGauge } from "@/components/TrustGauge";
 import { ScanLine, Sparkles, Package, Shield, ChevronLeft, ChevronRight, MapPin, Leaf, Factory, Truck, CheckCircle2, Link2 } from "lucide-react";
 import jsQR from "jsqr";
-import { ApiBatch, getBatchById } from "@/lib/api";
+import { ApiBatch, getBatchById, reportSideEffect } from "@/lib/api";
 
 const navFull = [
   { label: "Scan", to: "/consumer", icon: ScanLine },
@@ -40,6 +40,8 @@ const Consumer = () => {
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [nearbyFarmer, setNearbyFarmer] = useState("Ravi Kumar");
+  const [symptoms, setSymptoms] = useState("");
+  const [severity, setSeverity] = useState("Mild");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const getLocationLabel = () => {
@@ -59,8 +61,15 @@ const Consumer = () => {
 
   /** MongoDB ObjectId is exactly 24 hex characters — looser patterns mis-decode QR noise. */
   const parseBatchId = (value: string) => {
-    const m = value.match(/\/batch\/view\/([a-f0-9]{24})\b/i);
-    if (m?.[1]) return m[1].toLowerCase();
+    const patterns = [
+      /\/batch\/view\/([a-f0-9]{24})\b/i,
+      /\/batch\/public\/([a-f0-9]{24})\b/i,
+      /\/batch\/([a-f0-9]{24})\b/i,
+    ];
+    for (const pattern of patterns) {
+      const m = value.match(pattern);
+      if (m?.[1]) return m[1].toLowerCase();
+    }
     const t = value.trim();
     if (/^[a-f0-9]{24}$/i.test(t)) return t.toLowerCase();
     return null;
@@ -354,93 +363,195 @@ const Consumer = () => {
   const locationLabel = getLocationLabel();
   const farmerLabel = farmerName || "Local farmer";
   const herbLabel = batch?.herb_name || "—";
+  const isMedicine = batch?.type === "medicine";
   const trustLabel = batch?.trust_score ?? 0;
   const txLabel = batch?.tx_hash || "N/A";
   const stageLabel = batch?.stage || "Collected";
+  const mapQuery = (batch?.location || locationLabel || "").trim();
+  const verificationBaseUrl = (() => {
+    const raw = import.meta.env.VITE_API_BASE_URL?.trim();
+    if (raw) {
+      const normalized = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      try {
+        return new URL(normalized).origin;
+      } catch {
+        // ignore malformed env and fall back below
+      }
+    }
+    if (import.meta.env.DEV) {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    return window.location.origin;
+  })();
+  const verifyUrl = batch?._id ? `${verificationBaseUrl}/batch/view/${batch._id}` : null;
+  const polygonUrl = batch?.tx_hash ? `https://amoy.polygonscan.com/tx/${batch.tx_hash}` : null;
+
+  const parseCoords = (value: string): { lat: number; lon: number } | null => {
+    const m = value.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    const lat = Number(m[1]);
+    const lon = Number(m[2]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+    return { lat, lon };
+  };
+
+  const mapsHref = (() => {
+    const parsed = parseCoords(mapQuery);
+    if (parsed) return `https://www.google.com/maps?q=${parsed.lat},${parsed.lon}`;
+    return `https://www.google.com/maps?q=${encodeURIComponent(mapQuery)}`;
+  })();
+
+  const handleReportSideEffect = async () => {
+    if (!batch?._id) return;
+    if (!symptoms.trim()) return;
+    try {
+      await reportSideEffect(batch._id, { symptoms: symptoms.trim(), severity });
+      setSymptoms("");
+      setSeverity("Mild");
+      window.alert("Side effect reported successfully");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Failed to report side effect");
+    }
+  };
 
   const slides = [
     {
-      title: "Meet your farmer",
-      sub: `${farmerLabel} · ${batch?.location ?? locationLabel}`,
+      title: "Medicine Info",
+      sub: "Final medicine product",
+      body: (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border/50 bg-card/40 p-4">
+            <div className="text-xs text-muted-foreground">Product name</div>
+              <div className="text-xl font-bold">{batch?.product_name || `${herbLabel} Medicine`}</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">{isMedicine ? "Final medicine product" : "Herb-origin product"}</div>
+          </div>
+          <div className="rounded-xl border border-border/50 bg-card/40 p-4">
+            <div className="text-xs text-muted-foreground">Batch</div>
+            <div className="font-mono">{batch?._id}</div>
+            <div className="mt-2 text-xs text-muted-foreground">Current stage: {stageLabel}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: "Composition",
+      sub: "Herb composition with quantities",
+      body: (
+        <div className="space-y-3">
+          {(batch?.composition?.length
+            ? batch.composition
+            : [{ herb: batch?.herb_name || "Unknown", quantity: `${batch?.quantity || 0}mg`, farmer: farmerLabel, location: batch?.location || locationLabel }]
+          ).map((item, idx) => (
+            <div key={`${item.herb}-${idx}`} className="rounded-xl border border-border/50 bg-card/40 p-3">
+              <div className="font-semibold">{item.herb}</div>
+              <div className="text-xs text-muted-foreground">{item.quantity}</div>
+            </div>
+          ))}
+        </div>
+      ),
+    },
+    {
+      title: "Source",
+      sub: "Farmer source and origin",
       body: (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-secondary text-secondary-foreground font-bold text-xl">{farmerInitials}</div>
             <div>
               <div className="font-semibold">{farmerLabel}</div>
-              <div className="text-xs text-muted-foreground">{batch ? `Batch: ${herbLabel}` : "Live location detected"}</div>
+              <div className="text-xs text-muted-foreground">{batch?.location ?? locationLabel}</div>
             </div>
           </div>
-          <div className="relative h-40 overflow-hidden rounded-xl border border-border/60 bg-card/40">
-            <div className="absolute inset-0 grid-bg opacity-60" />
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-              <span className="relative flex h-4 w-4">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex h-4 w-4 rounded-full bg-primary shadow-[0_0_20px_hsl(var(--primary))]" />
-              </span>
-            </div>
-            <div className="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-[11px] backdrop-blur">
-              <MapPin className="h-3 w-3 text-primary" /> {locationLabel}
-            </div>
+          <a
+            href={mapsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-full bg-background/80 px-2.5 py-1 text-[11px] backdrop-blur hover:bg-background transition-colors"
+          >
+            <MapPin className="h-3 w-3 text-primary" /> Open origin map
+          </a>
+        </div>
+      ),
+    },
+    {
+      title: "Trust",
+      sub: "Quality and trust overview",
+      body: (
+        <div className="flex flex-col items-center py-4">
+          <TrustGauge value={trustLabel} size={220} label={batch?.trust_grade ?? "Verified"} />
+          <div className="mt-4 grid w-full gap-2">
+            <div className="rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-xs">Quality score: <span className="font-semibold">{batch?.quality_score ?? 0}</span></div>
+            <div className="rounded-lg border border-border/50 bg-card/40 px-3 py-2 text-xs">Trust score: <span className="font-semibold text-primary">{batch?.trust_score ?? 0}</span></div>
           </div>
         </div>
       ),
     },
     {
-      title: "Supply journey",
-      sub: `Stage: ${stageLabel}`,
+      title: "Journey",
+      sub: "Collected to Packaged timeline",
       body: (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {[
-            { i: Leaf, t: "Collected", d: batch ? `${herbLabel} · ${batch.location}` : "Collected", c: "secondary" },
-            { i: Truck, t: "Processed", d: "Quality & geo validated", c: "primary" },
-            { i: Factory, t: "Manufactured", d: "Stage updated by manufacturer", c: "accent" },
-            { i: Package, t: "Packaged", d: "Ready for consumer", c: "secondary" },
-          ].map(({ i: I, t, d, c }, idx) => (
+            { i: Leaf, t: "Collected", c: "secondary" },
+            { i: Truck, t: "Processed", c: "primary" },
+            { i: Factory, t: "Manufactured", c: "accent" },
+            { i: Package, t: "Packaged", c: "secondary" },
+          ].map(({ i: I, t, c }, idx) => (
             <div key={t} className="flex items-center gap-3 animate-fade-in-up" style={{ animationDelay: `${idx * 100}ms` }}>
               <div className={`grid h-9 w-9 place-items-center rounded-lg bg-${c}/10 text-${c} border border-${c}/30`}><I className="h-4 w-4" /></div>
               <div className="flex-1">
                 <div className="text-sm font-medium">{t}</div>
-                <div className="text-[11px] text-muted-foreground">{d}</div>
               </div>
-              <CheckCircle2 className="h-4 w-4 text-secondary" />
+              <CheckCircle2 className={`h-4 w-4 ${t === stageLabel ? "text-primary" : "text-secondary"}`} />
             </div>
           ))}
         </div>
       ),
     },
     {
-      title: "AI quality insights",
-      sub: "Every herb, computer-vision graded",
+      title: "Safety",
+      sub: "Dosage, warnings, side-effect report",
       body: (
-        <div className="space-y-4">
-          {[
-            ["AI quality score", batch?.quality_score ?? 0, "primary"],
-            ["Trust score", batch?.trust_score ?? 0, "secondary"],
-            ["Photos used", Math.min(100, (batch?.photo_count ?? 0) * 16), "accent"],
-            ["Geo verification", batch?.location ? 100 : 40, "secondary"],
-          ].map(([l, v, c], i) => (
-            <div key={l as string} style={{ animationDelay: `${i*120}ms` }} className="animate-fade-in-up">
-              <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-muted-foreground">{l}</span>
-                <span className={`font-mono font-bold text-${c}`} style={{ textShadow: "0 0 8px currentColor" }}>{v}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div className="h-full rounded-full transition-[width] duration-1000 ease-out"
-                  style={{ width: `${v}%`, background: `hsl(var(--${c}))`, boxShadow: `0 0 12px hsl(var(--${c}))` }} />
-              </div>
-            </div>
-          ))}
+        <div className="space-y-3">
+          <div className="rounded-xl border border-border/50 bg-card/40 p-3 text-sm">
+            <div className="text-xs text-muted-foreground">Dosage</div>
+            <div>{batch?.dosage || (isMedicine ? "1 tablet after meals" : "As prescribed by physician")}</div>
+          </div>
+          <div className="rounded-xl border border-border/50 bg-card/40 p-3 text-sm">
+            <div className="text-xs text-muted-foreground">Warnings</div>
+            <div>{(batch?.warnings || ["Consult a physician before use"]).join(", ")}</div>
+          </div>
+          <input
+            value={symptoms}
+            onChange={(e) => setSymptoms(e.target.value)}
+            className="w-full rounded-lg border border-border bg-input/60 px-3 py-2 text-xs"
+            placeholder="Report side effects"
+          />
+          <select value={severity} onChange={(e) => setSeverity(e.target.value)} className="w-full rounded-lg border border-border bg-input/60 px-3 py-2 text-xs">
+            <option>Mild</option>
+            <option>Moderate</option>
+            <option>Severe</option>
+          </select>
+          <button onClick={handleReportSideEffect} className="w-full rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20">
+            Report side effect
+          </button>
         </div>
       ),
     },
     {
-      title: "Trust Score",
-      sub: "The final verdict, on-chain",
+      title: "Blockchain",
+      sub: "Verified on blockchain",
       body: (
         <div className="flex flex-col items-center py-4">
-          <TrustGauge value={trustLabel} size={240} label={batch?.trust_grade ?? "Verified"} />
-          <div className="mt-4 text-sm text-muted-foreground font-mono">{batch?._id ? `Batch ${batch._id}` : "Scan a batch to view details"}</div>
+          <div className="mt-2 text-sm text-muted-foreground font-mono break-all">{txLabel}</div>
+          <button
+            onClick={() => polygonUrl && window.open(polygonUrl, "_blank", "noopener,noreferrer")}
+            disabled={!polygonUrl}
+            className="relative overflow-hidden mt-6 w-full rounded-xl bg-gradient-accent px-6 py-3.5 font-semibold text-accent-foreground shadow-[0_0_40px_hsl(var(--accent)/0.5)] disabled:opacity-60 hover:scale-[1.01] transition-transform"
+          >
+            <span className="relative z-10 inline-flex items-center gap-2"><Link2 className="h-4 w-4" /> Open PolygonScan</span>
+          </button>
         </div>
       ),
     },
@@ -578,7 +689,12 @@ const Consumer = () => {
                 <CheckCircle2 className="h-3.5 w-3.5" /> Verified on AyurTrust mainnet
               </div>
             )}
-            <button onClick={() => setVerified(true)} disabled={verified}
+            <button
+              onClick={() => {
+                if (polygonUrl) window.open(polygonUrl, "_blank", "noopener,noreferrer");
+                setVerified(true);
+              }}
+              disabled={verified || !polygonUrl}
               className="relative overflow-hidden mt-6 w-full rounded-xl bg-gradient-accent px-6 py-3.5 font-semibold text-accent-foreground shadow-[0_0_40px_hsl(var(--accent)/0.5)] disabled:opacity-60 hover:scale-[1.01] transition-transform">
               <span className="relative z-10 inline-flex items-center gap-2"><Link2 className="h-4 w-4" /> {verified ? "Authenticated" : "Verify on-chain"}</span>
               {!verified && <span className="absolute inset-0 bg-[linear-gradient(110deg,transparent,hsl(0_0%_100%/0.3),transparent)] bg-[length:200%_100%] animate-shimmer" />}
@@ -602,13 +718,28 @@ const Consumer = () => {
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {[
                 ["Stage", stageLabel],
+                ["Type", isMedicine ? "Medicine" : "Herb"],
                 ["Trust grade", batch?.trust_grade ?? "—"],
                 ["Origin", batch?.location ?? "—"],
                 ["Batch", batch?._id ?? "—"],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-xl border border-border/40 bg-card/40 px-4 py-3">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</div>
-                  <div className="mt-0.5 text-sm font-medium">{v}</div>
+                  <div className="mt-0.5 text-sm font-medium">
+                    {k === "Batch" && verifyUrl ? (
+                      <a
+                        href={verifyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline-offset-2 hover:underline"
+                        title="Open AyurTrust verification page"
+                      >
+                        {v}
+                      </a>
+                    ) : (
+                      v
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

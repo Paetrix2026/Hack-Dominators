@@ -1,1 +1,6 @@
 app/firebase/serviceAccountKey.json
+venv/
+__pycache__/
+*.pyc
+.env
+node_modules/

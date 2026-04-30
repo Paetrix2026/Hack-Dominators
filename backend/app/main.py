@@ -1,9 +1,11 @@
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
 # 📦 ROUTES
 from app.routes import batch_routes
@@ -40,7 +42,17 @@ app.add_middleware(
 
 # 🔗 REGISTER ROUTES
 app.include_router(batch_routes.router)
+app.include_router(batch_routes.public_router)
 app.include_router(voice_routes.router)   # ✅ ADD THIS
+
+UPLOAD_DIR = Path(__file__).resolve().parents[1] / "uploaded_photos"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="api-uploads")
+QR_DIR = Path(__file__).resolve().parents[1] / "qr_codes"
+QR_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/qr_codes", StaticFiles(directory=str(QR_DIR)), name="qr-codes")
+app.mount("/api/qr_codes", StaticFiles(directory=str(QR_DIR)), name="api-qr-codes")
 
 
 @app.on_event("startup")
