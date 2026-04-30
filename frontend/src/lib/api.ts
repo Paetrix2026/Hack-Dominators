@@ -9,6 +9,7 @@ import { getFirebaseAuth } from "@/lib/firebase";
 const resolveApiBase = (): string => {
   const raw = import.meta.env.VITE_API_BASE_URL?.trim();
   const isDev = import.meta.env.DEV;
+  const hostedBackend = "https://hack-dominators.onrender.com";
   if (isDev) {
     if (raw) return raw.replace(/\/+$/, "");
     return "/api";
@@ -21,15 +22,12 @@ const resolveApiBase = (): string => {
       if (hostname === "localhost" || hostname === "127.0.0.1") {
         return "/api";
       }
-      if (hostname.endsWith("onrender.com")) {
-        return "/api";
-      }
     } catch {
       /* ignore */
     }
     return u.replace(/\/+$/, "");
   }
-  return "/api";
+  return hostedBackend;
 };
 
 const API_BASE = resolveApiBase();
