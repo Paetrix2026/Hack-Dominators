@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 .env
 node_modules/
+backend/qr_codes/
+backend/uploaded_photos/
